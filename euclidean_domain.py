@@ -35,6 +35,9 @@ class EuclideanDomain(ABC):
     def norm(self): pass
 
     @abstractmethod
+    def normalise(self): pass
+
+    @abstractmethod
     def div(self, oth) -> tuple[EDType, EDType]: pass
 
     def __floordiv__(self, oth):
@@ -97,6 +100,8 @@ class Int(EuclideanDomain):
     def __init__(self, n): self.n = n
     @property
     def norm(self): return abs(self.n)
+    def normalise(self):
+        return -self if self.n < 0 else self
     def __add__(self, oth): return Int(self.n + oth.n)
     def __neg__(self): return Int(-self.n)
     def __mul__(self, oth: Union[IntType, Matrix]):
@@ -208,10 +213,18 @@ class Poly(EuclideanDomain):
         return self / self.lead
 
     @staticmethod
+    def _superscript_str(n: int) -> str:
+        charmap = {'0': '\u2071', '1': '\u00B9', '2': '\u00B2', '3': '\u00B3',
+                   '4': '\u2074', '5': '\u2075', '6': '\u2076', '7': '\u2077',
+                   '8': '\u2078', '9': '\u2079'}
+        if n == 0 or n == 1: return ''
+        else: return ''.join(charmap[c] for c in str(n))
+
+    @staticmethod
     def _monomial_repr(idx: int, coeff: float) -> str:
-        if idx == 0: return str(coeff)
-        xpow_str = f'x' if idx == 1 else f'x^{idx}'
-        return xpow_str if coeff == 1 else f'{coeff}{xpow_str}'
+        if idx == 0: return f'{coeff:.1f}'
+        xpow_str = f'x{Poly._superscript_str(idx)}'
+        return xpow_str if coeff == 1 else f'{coeff:.1f}{xpow_str}'
 
     def __repr__(self):
         if (n := self.norm) == 0: return '0'

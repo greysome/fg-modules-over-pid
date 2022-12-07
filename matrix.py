@@ -134,18 +134,17 @@ class Matrix:
     '''
     Numpy-style indexing.
     '''
-    def __getitem__(self, args: Any) -> MatrixType:
-        try: args[0]
+    def __getitem__(self, key: Any) -> MatrixType:
+        try: key[0]
         except TypeError:
-            # args is not a Sequence, but a single index.
+            # key consists of only a single index.
             # in this case obtain the corresponding row
-            return M(*self.data[args], eor)
+            if isinstance(key, slice): return Matrix(deepcopy(self.data[key]))
+            else: return Matrix([deepcopy(self.data[key])])
         else:
-            match len(args):
-                # the 1-argument case is already handled in except
-                case 0: raise AssertionError('must have >=1 argument')
+            match len(key):
                 case 2:
-                    rows, cols = args[0], args[1]
+                    rows, cols = key[0], key[1]
                     match (isinstance(rows, slice), isinstance(cols, slice)):
                         case (True, True): pass
                         case (True, False): cols = slice(cols, cols+1)
@@ -154,7 +153,36 @@ class Matrix:
                     if self.data[0][cols] == []:
                         return Matrix()
                     return Matrix([row[cols] for row in self.data[rows]])
-                case other: raise AssertionError('too many arguments')
+                case other: raise AssertionError('__getitem__ must have either 1 or 2 arguments')
+
+    def __setitem__(self, key: Any, value: Any):
+        try: key[0]
+        except TypeError:  # replacing a row
+            assert isinstance(value, Matrix), 'RHS must be a matrix'
+            assert value.typ is self.typ, 'types of LHS and RHS do not match'
+            assert value.m == self[key].m and value.n == self[key].n, 'dimensions of LHS and RHS do not match'
+            if not isinstance(key, slice):
+                key = slice(key, key+1)
+            for idx, i in enumerate(range(self.m)[key]):
+                for j in range(self.n):
+                    self.data[i][j] = value.data[idx][j]
+        else:
+            match len(key):
+                case 2:
+                    rows, cols = key[0], key[1]
+                    match (isinstance(rows, slice), isinstance(cols, slice)):
+                        case (True, True): pass
+                        case (True, False): cols = slice(cols, cols+1)
+                        case (False, True): rows = slice(rows, rows+1)
+                        case (False, False):  # setting a single entry
+                            assert type(value) is self.typ, 'types of LHS and RHS do not match'
+                            self.data[rows][cols] = value
+                            return
+                    for idx1, i in enumerate(range(self.m)[rows]):
+                        for idx2, j in enumerate(range(self.n)[cols]):
+                            self.data[i][j] = value.data[idx1][idx2]
+                case other:
+                    raise AssertionError('__setitem__ must have either 1 or 2 arguments')
 
     '''
     Convert matrices with a single row/column to a list of entries.
@@ -184,13 +212,25 @@ class Matrix:
         return Matrix([[self[i,j]+oth[i,j] for j in range(self.n)] for i in range(self.m)])
 
     def __radd__(self, oth: Optional[MatrixType]) -> MatrixType:
-        return self + oth
+        assert oth == None
+        return self
 
     '''
     Negation.
     '''
     def __neg__(self) -> MatrixType:
         return Matrix([[-self[i,j] for j in range(self.n)] for i in range(self.m)])
+
+    '''
+    Subtraction.
+    '''
+    def __sub__(self, oth: Optional[MatrixType]) -> MatrixType:
+        if oth == None: return deepcopy(self)
+        return self + (-oth)
+
+    def __rsub__(self, oth: Optional[MatrixType]) -> MatrixType:
+        assert oth == None
+        return self
 
     '''
     Scalar multiplication.
@@ -313,6 +353,12 @@ class Matrix:
                 elif rowidx == len(self.data)-1: s += '\u23a6'
                 else: s += '\u23a5\n'
         return s
+
+    def find(self, f: Callable) -> Optional[tuple[int,int]]:
+        for i in range(self.m):
+            for j in range(self.n):
+                if f(self.data[i][j]): return i,j
+        else: return None
 
 M = Matrix.M
 mapM = Matrix.mapM

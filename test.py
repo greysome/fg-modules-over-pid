@@ -36,10 +36,28 @@ class MatrixTest(unittest.TestCase):
     def test_getitem(self):
         A = M(1,2,3,4,5,6,7,8,9)
         self.assertEqual(A[0], M(1,2,3,eor))
+        self.assertEqual(A[1:], M(4,5,6,eor,7,8,9))
         self.assertEqual(A[:,0], M(1,4,7,eoc))
         self.assertEqual(A[0,0], 1)
         self.assertEqual(A[0,:2], M(1,2,eor))
         self.assertEqual(A[1:,1:], M(5,6,8,9))
+
+    def test_setitem(self):
+        A = M(1,2,3,4,5,6,7,8,9)
+        A[0] = M(0,0,0,eor)
+        self.assertEqual(A, M(0,0,0,4,5,6,7,8,9))
+        A = M(1,2,3,4,5,6,7,8,9)
+        A[1:] = M(0,0,0,eor,0,0,0)
+        self.assertEqual(A, M(1,2,3,0,0,0,0,0,0))
+        A = M(1,2,3,4,5,6,7,8,9)
+        A[0,0] = 0
+        self.assertEqual(A, M(0,2,3,4,5,6,7,8,9))
+        A = M(1,2,3,4,5,6,7,8,9)
+        A[1:,1:] = M(0,0,0,0)
+        self.assertEqual(A, M(1,2,3,4,0,0,7,0,0))
+        A = M(1,2,3,4,5,6,7,8,9)
+        A[:,0] = M(0,0,0,eoc)
+        self.assertEqual(A, M(0,2,3,0,5,6,0,8,9))
 
     def test_lst(self):
         self.assertEqual(M().lst, [])
@@ -144,6 +162,7 @@ class MathTest(unittest.TestCase):
         self.assertEqual(a*X+b*(X+1), d)
 
     def test_egcdl(self):
+        self.assertEqual(egcdl([Int(1)]), (Int(1),[Int(1)]))
         d,(a,b,c) = egcdl([Int(0), Int(2), Int(3)])
         self.assertEqual(d, Int(1))
         self.assertEqual(a*Int(0)+b*Int(2)+c*Int(3), d)
