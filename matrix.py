@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from util import *
 
 '''
-End-of-column/row markers, to pass into the constructor `M()`
+End-of-column/row markers, to pass into the constructor `Matrix()`
 '''
 Marker = Enum('Marker', ('eoc', 'eor'))
 eoc = Marker.eoc
@@ -19,7 +19,7 @@ ExtensionTyp: TypeAlias = 'Extension'
 '''
 A 2D array of elements of the same type. The public API provides two ways
 to construct matrices: the raw `__init__` constructor, as well as a special
-fancy constructor `M()`.
+fancy constructor `Matrix()`.
 '''
 class Matrix:
     #==============#
@@ -53,7 +53,7 @@ class Matrix:
         return Matrix._build_rows(collen, entries).transpose
 
     '''
-    `M()` provides a convenient way to define matrices. There are three ways it can be used:
+    `Matrix()` provides a convenient way to define matrices. There are three ways it can be used:
     - `M(*firstrow, eor, *remaining)` to list out entries row-wise
     - `M(*firstcol, eoc, *remaining)` to list out entries column-wise
     - `M(*entries)` if the number of entries is a perfect square, in which case a square matrix
@@ -96,9 +96,9 @@ class Matrix:
                 copy[idx] = fn(x)
         return M(*copy)
 
-    #========================#
-    # PROPERTIES OF MATRICES #
-    #========================#
+    #==================#
+    # BASIC PROPERTIES #
+    #==================#
 
     '''
     m and n are the number of rows and columns respectively.
@@ -155,6 +155,24 @@ class Matrix:
                     return Matrix([row[cols] for row in self.data[rows]])
                 case other: raise AssertionError('__getitem__ must have either 1 or 2 arguments')
 
+    '''
+    Convert matrices with a single row/column to a list of entries.
+    Otherwise convert it to a list of lists.
+    '''
+    @property
+    def lst(self) -> list:
+        if self.m == 1: return self.data[0]
+        if self.n == 1: return [row[0] for row in self.data]
+        return self.data
+
+    @property
+    def transpose(self) -> MatrixType:
+        return Matrix([[self.data[i][j] for i in range(self.m)] for j in range(self.n)])
+
+    #==================#
+    # BASIC OPERATIONS #
+    #==================#
+
     def __setitem__(self, key: Any, value: Any):
         try: key[0]
         except TypeError:  # replacing a row
@@ -184,23 +202,30 @@ class Matrix:
                 case other:
                     raise AssertionError('__setitem__ must have either 1 or 2 arguments')
 
-    '''
-    Convert matrices with a single row/column to a list of entries.
-    Otherwise convert it to a list of lists.
-    '''
-    @property
-    def lst(self) -> list:
-        if self.m == 1: return self.data[0]
-        if self.n == 1: return [row[0] for row in self.data]
-        return self.data
+    def __delitem__(self, key: Any):
+        try: key[0]
+        except TypeError:  # deleting a row
+            if not isinstance(key, slice):
+                key = slice(key, key+1)
+            del self.data[key]
+        else:
+            match len(key):
+                case 2:
+                    rows, cols = key[0], key[1]
+                    if rows == None:
+                        rows = slice(0,0,1)  # empty slice
+                    elif not isinstance(rows, slice):
+                        rows = slice(rows, rows+1)
+                    if cols == None:
+                        cols = slice(0,0,1)
+                    elif not isinstance(cols, slice):
+                        cols = slice(cols, cols+1)
 
-    @property
-    def transpose(self) -> MatrixType:
-        return Matrix([[self.data[i][j] for i in range(self.m)] for j in range(self.n)])
-
-    #========================#
-    # OPERATIONS ON MATRICES #
-    #========================#
+                    del self.data[rows]
+                    for i in range(self.m):
+                        del self.data[i][cols]
+                case other:
+                    raise AssertionError('__delitem__ must have either 1 or 2 arguments')
 
     '''
     Element-wise addition. Addition with None (to the left or right)
@@ -233,6 +258,14 @@ class Matrix:
         return self
 
     '''
+    Matrix multiplication.
+    '''
+    def __mul__(self, oth: MatrixType) -> MatrixType:
+        assert self.n == oth.m, 'matrix dimensions do not match'
+        return Matrix([[sum((self.data[i][k]*oth.data[k][j] for k in range(self.n)), self.default)
+                        for j in range(oth.n)] for i in range(self.m)])
+
+    '''
     Scalar multiplication.
     '''
     def __rmul__(self, oth: Any) -> MatrixType:
@@ -241,10 +274,10 @@ class Matrix:
 
     '''
     There is an API around *extensions* to (nonempty) matrices, namely
-    adding a new column/row.
+    adding a new column / row.
     This is facilitated by the class Extension which removes the
     burden of having to specify the exact matrix data of the
-    aforementioned column/row.
+    aforementioned column / row.
     Rather, this is done automatically by _inferext().
     Also, see docstring above Extension for examples.
     '''
@@ -255,33 +288,53 @@ class Matrix:
                     case ExtensionDataType.none:
                         return M(*[self.default for _ in range(self.m)], eor)
                     case ExtensionDataType.single:
-                        assert isinstance(ext.data, self.typ), 'types do not match'
+                        if self != Matrix():
+                            assert isinstance(ext.data, self.typ), 'types do not match'
                         return M(*[ext.data for _ in range(self.m)], eor)
                     case ExtensionDataType.exact:
-                        assert isinstance(ext.data[0], self.typ), 'types do not match'
-                        assert len(ext.data) == self.n, 'dimensions do not match'
+                        if self != Matrix():
+                            assert isinstance(ext.data[0], self.typ), 'types do not match'
+                            assert len(ext.data) == self.n, 'dimensions do not match'
                         return M(*ext.data, eor)
             case ExtensionType.col:
                 match ext.datatyp:
                     case ExtensionDataType.none:
                         return M(*[self.default for _ in range(self.m)], eoc)
                     case ExtensionDataType.single:
-                        assert isinstance(ext.data, self.typ), 'types do not match'
+                        if self != Matrix():
+                            assert isinstance(ext.data, self.typ), 'types do not match'
                         return M(*[ext.data for _ in range(self.m)], eoc)
                     case ExtensionDataType.exact:
-                        assert isinstance(ext.data[0], self.typ), 'types do not match'
-                        assert len(ext.data) == self.m, 'dimensions do not match'
+                        if self != Matrix():
+                            assert isinstance(ext.data[0], self.typ), 'types do not match'
+                            assert len(ext.data) == self.m, 'dimensions do not match'
                         return M(*ext.data, eoc)
 
     @staticmethod
     def _concat_horizontal(A: MatrixType, B: MatrixType) -> MatrixType:
+        if A == Matrix(): return B
+        elif B == Matrix(): return A
         assert A.m == B.m, 'dimensions do not match'
+        assert A.typ == B.typ, 'types do not match'
         return Matrix([A.data[i] + B.data[i] for i in range(A.m)])
 
     @staticmethod
     def _concat_vertical(A: MatrixType, B: MatrixType) -> MatrixType:
+        if A == Matrix(): return B
+        elif B == Matrix(): return A
         assert A.n == B.n, 'dimensions do not match'
+        assert A.typ == B.typ, 'types do not match'
         return Matrix(A.data + B.data)
+
+    @staticmethod
+    def _concat_diagonal(A: MatrixType, B: MatrixType) -> MatrixType:
+        if A == Matrix(): return B
+        elif B == Matrix(): return A
+        assert A.typ == B.typ, 'types do not match'
+        data = []
+        for i in range(A.m): data.append(A.data[i] + [A.default for _ in range(B.n)])
+        for i in range(B.m): data.append([B.default for _ in range(A.n)] + B.data[i])
+        return Matrix(data)
 
     '''
     Extending a matrix to the right or bottom, or horizontally concatenating
@@ -325,6 +378,16 @@ class Matrix:
     def __rand__(self, oth: Optional[MatrixType]) -> MatrixType:
         return self & oth
 
+    '''
+    Diagonally concatenating another matrix.
+    '''
+    def __xor__(self, oth: Optional[MatrixType]) -> MatrixType:
+        if oth == None: return deepcopy(self)
+        return Matrix._concat_diagonal(self, oth)
+
+    def __rxor__(self, oth: Optional[MatrixType]) -> MatrixType:
+        return self ^ oth
+
     def __eq__(self, oth: MatrixType) -> bool:
         return type(self) is type(oth) and self.data == oth.data
 
@@ -360,8 +423,134 @@ class Matrix:
                 if f(self.data[i][j]): return i,j
         else: return None
 
+    #===============#
+    # MATH ROUTINES #
+    #===============#
+    '''
+    Morally this should only be defined for matrices over a EuclideanDomain.
+    But I cannot import the class as it would lead to circular imports.
+    '''
+    @property
+    def det(self):
+        assert self.m == self.n, 'det only defined for square matrices'
+        if self.m == 1: return self[0,0]
+        res = self.typ.zero
+        for i in range(self.m):
+            A = deepcopy(self)
+            del A[i,0]
+            x = self.data[i][0]
+            res += x*A.det if i%2==0 else x*(-A.det)
+        return res
+
+    def cof(self, i: int, j: int):
+        assert self.m == self.n, 'cof only defined for square matrices'
+        A = deepcopy(self)
+        del A[i,j]
+        return A.det if (i+j)%2==0 else -A.det
+
+    @property
+    def adj(self) -> MatrixType:
+        assert self.m == self.n, 'adj only defined for square matrices'
+        return Matrix([[self.cof(i,j) for i in range(self.m)] for j in range(self.n)])
+
+    @property
+    def inv(self) -> MatrixType:
+        assert self.m == self.n, 'inv only defined for square matrices'
+        assert self.det.isunit, 'determinant must be a unit'
+        if self.m == 1: return M(self.typ.one/self.det)
+        return (self.typ.one/self.det) * self.adj
+
+    def I(typ: type, n: int) -> MatrixType:
+        assert n >= 0
+        return Matrix([[typ.zero for _ in range(i)] + [typ.one] + [typ.zero for _ in range(n-i-1)]
+                       for i in range(n)])
+
+    '''
+    The next few functions deal with elementary row/column operations.
+    In addition to mutating the original matrix, they return an
+    elementary matrix corresponding to the operation.
+    '''
+    def swaprow(self, i: int, j: int) -> MatrixType:
+        self[i], self[j] = self[j], self[i]
+        A = I(self.typ, self.m)
+        A[i,i], A[j,j], A[i,j], A[j,i] = \
+            self.typ.zero, self.typ.zero, self.typ.one, self.typ.one
+        return A
+
+    def swapcol(self, i: int, j: int) -> MatrixType:
+        self[:,i], self[:,j] = self[:,j], self[:,i]
+        A = I(self.typ, self.n)
+        A[i,i], A[j,j], A[i,j], A[j,i] = \
+            self.typ.zero, self.typ.zero, self.typ.one, self.typ.one
+        return A
+
+    def scalerow(self, i: int, c: Any) -> MatrixType:
+        assert isinstance(c, self.typ)
+        self[i] *= c
+        A = I(self.typ, self.m)
+        A[i,i] = c
+        return A
+
+    def scalecol(self, j: int, c: Any) -> MatrixType:
+        assert isinstance(c, self.typ)
+        self[:,j] *= c
+        A = I(self.typ, self.n)
+        A[j,j] = c
+        return A
+
+    def addrow(self, i: int, j: int, c: Any) -> MatrixType:
+        assert isinstance(c, self.typ)
+        self[i] += c * self[j]
+        A = I(self.typ, self.m)
+        A[i,j] = c
+        return A
+
+    def addcol(self, i: int, j: int, c: Any) -> MatrixType:
+        assert isinstance(c, self.typ)
+        self[:,i] += c * self[:,j]
+        A = I(self.typ, self.n)
+        A[j,i] = c
+        return A
+
 M = Matrix.M
 mapM = Matrix.mapM
+I = Matrix.I
+
+
+'''
+There are two types of extensions to a matrix M: `row` and `col`. There
+are three ways to specify an extension, corresponding to a different
+ExtensionDataType.
+- `none` means that the new row/col will be filled with `M.default`
+- `single` means that the new row/col will be filled with a single specified entry
+- `exact` means that a specified list of entries will be inserted
+
+Examples:
+> from euclidean_domain import Int
+> A = mapM(Int,1,2,3,4)
+> A | row()
+⎡ 1 2 ⎤
+⎢ 3 4 ⎥
+⎣ 0 0 ⎦
+> col(Int(5)) | A
+⎡ 5 1 2 ⎤
+⎣ 5 3 4 ⎦
+> A | row(Int(5),Int(6))
+⎡ 1 2 ⎤
+⎢ 3 4 ⎥
+⎣ 5 6 ⎦
+'''
+ExtensionType = Enum('ExtensionType', ('row', 'col'))
+ExtensionDataType = Enum('ExtensionDataType', ('none', 'single', 'exact'))
+class Extension:
+    @staticmethod
+    def _aux(*args: Any) -> ExtensionTyp:
+        ext = Extension()
+        if len(args) == 0:
+            ext.data = None
+M = Matrix.M
+mapM = Matrix.mapM
+I = Matrix.I
 
 
 '''

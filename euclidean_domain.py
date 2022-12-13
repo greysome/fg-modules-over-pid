@@ -12,6 +12,7 @@ EDType: TypeAlias = 'EuclideanDomain'
 class EuclideanDomain(ABC):
     zero = NotImplemented
     one = NotImplemented
+    notation = NotImplemented
 
     @abstractmethod
     def __add__(self): pass
@@ -32,10 +33,13 @@ class EuclideanDomain(ABC):
 
     @property
     @abstractmethod
-    def norm(self): pass
+    def norm(self) -> int: pass
+
+    @property
+    def isunit(self) -> bool: return self.norm == 1
 
     @abstractmethod
-    def normalise(self): pass
+    def normalise(self) -> EDType: pass
 
     @abstractmethod
     def div(self, oth) -> tuple[EDType, EDType]: pass
@@ -97,6 +101,7 @@ lcm = EuclideanDomain.lcm
 
 IntType: TypeAlias = 'Int'
 class Int(EuclideanDomain):
+    notation = '\u2124'
     def __init__(self, n): self.n = n
     @property
     def norm(self): return abs(self.n)
@@ -119,6 +124,7 @@ Int.one = Int(1)
 
 PolyType: TypeAlias = 'Poly'
 class Poly(EuclideanDomain):
+    notation = '\u211a[x]'
     def __init__(self, coeffs: Optional[Sequence[Number]] = None) -> None:
         if coeffs is None: coeffs = [0]
         self.coeffs = coeffs
@@ -175,7 +181,7 @@ class Poly(EuclideanDomain):
         P = Poly([0])
         for idx1, i in enumerate(self.coeffs):
             for idx2, j in enumerate(oth.coeffs):
-                P += Poly([0]*(idx1+idx2) + [i*j])
+                P += Poly([0 for _ in range(idx1+idx2)] + [i*j])
         return P
 
     def __rmul__(self, oth: Number):
@@ -248,3 +254,36 @@ Poly.zero = Poly([0])
 Poly.one = Poly([1])
 X = Poly([0,1])
 C = Poly([1])
+
+GIType: TypeAlias = 'GaussInt'
+class GaussInt(EuclideanDomain):
+    notation = '\u2124[i]'
+    def __init__(self, first: Union[int,tuple[int,int]], second: int = 0):
+        if isinstance(first, tuple): re, im = first
+        else: re, im = first, second
+        self.re = re
+        self.im = im
+    @property
+    def norm(self): return self.re**2 + self.im**2
+    def normalise(self):
+        for z in (self, self*GaussInt(-1), self*GaussInt(0,1), self*GaussInt(0,-1)):
+            if z.re >= 0 and z.im >= 0:
+                return z
+    def __add__(self, oth): return GaussInt(self.re+oth.re, self.im+oth.im)
+    def __neg__(self): return GaussInt(-self.re, -self.im)
+    def __mul__(self, oth: Union[IntType, Matrix]):
+        if isinstance(oth, Matrix):
+            return oth.__rmul__(self)
+        a,b,c,d = self.re, self.im, oth.re, oth.im
+        return GaussInt(a*c-b*d, a*d+b*c)
+    def __repr__(self): return f'{self.re}+{self.im}i' if self.im >= 0 else \
+        f'{self.re}-{-self.im}i'
+    def __eq__(self, oth): return type(self) is type(oth) and self.re == oth.re and self.im == oth.im
+    def div(self, oth):
+        if oth.norm == 0: return GaussInt(0), GaussInt(0)
+        a,b,c,d = self.re, self.im, oth.re, oth.im
+        m, n = round((a*c+b*d) / oth.norm), round((-a*d+b*c) / oth.norm)
+        return GaussInt(m,n), self - oth*GaussInt(m,n)
+
+GaussInt.one = GaussInt(1)
+GaussInt.zero = GaussInt(0)

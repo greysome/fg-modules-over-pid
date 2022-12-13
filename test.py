@@ -59,6 +59,17 @@ class MatrixTest(unittest.TestCase):
         A[:,0] = M(0,0,0,eoc)
         self.assertEqual(A, M(0,2,3,0,5,6,0,8,9))
 
+    def test_delitem(self):
+        A = M(1,2,3,4,5,6,7,8,9)
+        del A[0]
+        self.assertEqual(A, M(4,5,6,eor,7,8,9))
+        A = M(1,2,3,4,5,6,7,8,9)
+        del A[None,0]
+        self.assertEqual(A, M(2,3,eor,5,6,8,9))
+        A = M(1,2,3,4,5,6,7,8,9)
+        del A[0,0]
+        self.assertEqual(A, M(5,6,8,9))
+
     def test_lst(self):
         self.assertEqual(M().lst, [])
         self.assertEqual(M(1,2,3,eor).lst, [1,2,3])
@@ -99,6 +110,14 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual(mapM(Int,5,6,7,8) & A, mapM(Int,5,6,eor,7,8,1,2,3,4))
         self.assertEqual(A & None, A)
         self.assertEqual(None & A, A)
+        self.assertEqual(diag(Int(5)) | A, mapM(Int,5,0,0,0,1,2,0,3,4))
+        self.assertEqual(A | diag(Int(5)), mapM(Int,1,2,0,3,4,0,0,0,5))
+        self.assertEqual(diag(Int(1)) | M(), mapM(Int,1))
+        self.assertEqual(M() | diag(Int(1)), mapM(Int,1))
+
+        self.assertEqual(A ^ mapM(Int,5,6,eoc), mapM(Int,1,2,0,eor,3,4,0,0,0,5,0,0,6))
+        self.assertEqual(A ^ None, A)
+        self.assertEqual(None ^ A, A)
 
 class PolyTest(unittest.TestCase):
     def test_C_and_X(self):
@@ -175,6 +194,21 @@ class MathTest(unittest.TestCase):
         self.assertEqual(lcm(Int(2),Int(3)), Int(6))
         self.assertEqual(lcm(Int(2),Int(4)), Int(4))
         self.assertEqual(lcm(Int(6),Int(9)), Int(18))
+
+    def test_det(self):
+        self.assertEqual(M(Int(1)).det, Int(1))
+        self.assertEqual(mapM(Int,1,2,3,5).det, Int(-1))
+        self.assertEqual(mapM(Int,1,2,3,5).adj, mapM(Int,5,-3,-2,1))
+        self.assertEqual(mapM(Int,1,2,3,5).inv, mapM(Int,-5,3,2,-1))
+
+    def test_I(self):
+        self.assertEqual(I(Int,0), M())
+        self.assertEqual(I(Int,1), mapM(Int,1))
+        self.assertEqual(I(Int,3), mapM(Int,1,0,0,0,1,0,0,0,1))
+
+    def test_matmul(self):
+        self.assertEqual(mapM(Int,1,2,3,4)*mapM(Int,1,2,3,4), mapM(Int,7,10,15,22))
+        self.assertEqual(mapM(Int,1,1,2,2)*mapM(Int,3,4,3,4), mapM(Int,6,8,12,16))
 
 if __name__ == '__main__':
     unittest.main()
