@@ -86,15 +86,16 @@ class Matrix:
                 else: return Matrix._build_rows(r, entries)
 
     '''
-    A small wrapper around M. Used primarily to construct EuclideanDomain.Int matrices.
+    A small wrapper around M. Used primarily to construct matrices over
+    EuclideanDomain.Int and EuclideanDomain.GaussInt.
     '''
     @staticmethod
     def mapM(fn: Callable, *entries: Any) -> MatrixType:
-        copy = [x for x in entries]
-        for idx, x in enumerate(copy):
+        entries = list(entries)
+        for idx, x in enumerate(entries):
             if type(x) != Marker:
-                copy[idx] = fn(x)
-        return M(*copy)
+                entries[idx] = fn(x)
+        return M(*entries)
 
     #==================#
     # BASIC PROPERTIES #
@@ -120,40 +121,64 @@ class Matrix:
     Default value associated with the matrix's type T. If T extends
     EuclideanDomain, then the default value is T.zero. Otherwise it is
     None.
-    An example where `default` is used: given matrices M (with
-    type T) and `N = row() | M`, the first row of N is populated with
-    T.zero.
+    An example where `default` is used: given matrices M and `N = row() | M`,
+    the first row of N is populated with M.default.
     '''
     @property
     def default(self) -> Any:
         if len(self.data) >= 1:
             try: return type(self.data[0][0]).zero
-            except AttributeError: return None
+            except AttributeError: return 0.0
         else: return None
 
     '''
-    Numpy-style indexing.
+    Parse the argument `key` for __get/setitem__.
+
+    If `key` is a 2-tuple and both components are non-slice indices, then return
+    both non-slice indices, as well as an extra boolean True (indicating that `key`
+    will be picking out a single element from the matrix rather than a submatrix).
+
+    Otherwise, return a pair of slices and False.
     '''
-    def __getitem__(self, key: Any) -> MatrixType:
+    @staticmethod
+    def _parse_key(key: Any) -> tuple[slice,slice,bool]:
         try: key[0]
         except TypeError:
-            # key consists of only a single index.
-            # in this case obtain the corresponding row
-            if isinstance(key, slice): return Matrix(deepcopy(self.data[key]))
-            else: return Matrix([deepcopy(self.data[key])])
+            # `key` is a single index
+            # In this case return the slice for the corresponding row(s)
+            if isinstance(key, slice):
+                return key, slice(None,None,None), False
+            else:
+                return slice(key,key+1,None), slice(None,None,None), False
         else:
             match len(key):
                 case 2:
-                    rows, cols = key[0], key[1]
+                    rows, cols = key
                     match (isinstance(rows, slice), isinstance(cols, slice)):
-                        case (True, True): pass
-                        case (True, False): cols = slice(cols, cols+1)
-                        case (False, True): rows = slice(rows, rows+1)
-                        case (False, False): return self.data[rows][cols]
-                    if self.data[0][cols] == []:
-                        return Matrix()
-                    return Matrix([row[cols] for row in self.data[rows]])
-                case other: raise AssertionError('__getitem__ must have either 1 or 2 arguments')
+                        case (True, True): return rows, cols, False
+                        case (True, False): return rows, slice(cols, cols+1), False
+                        case (False, True): return slice(rows, rows+1), cols, False
+                        case (False, False): return rows, cols, True
+                case other:
+                    raise AssertionError('key must have either 1 or 2 arguments')
+
+    '''
+    The functions __get/set/delitem__ accepts two types of arguments for the
+    argument `key`.
+    1. A single index (integer/slice), in which case the index acts on the rows.
+    2. A pair of indices, in which case the first index acts on the rows and the
+    second one on the indices.
+    '''
+    def __getitem__(self, key: Any) -> MatrixType:
+        rows, cols, singleflag = Matrix._parse_key(key)
+        if singleflag:
+            return self.data[rows][cols]
+        # If the column slice is empty, then return empty matrix rather than
+        # a matrix with data [[]].
+        if self.data[0][cols] == []:
+            return Matrix()
+        L = [row[cols] for row in self.data[rows]]
+        return Matrix([row[cols] for row in self.data[rows]])
 
     '''
     Convert matrices with a single row/column to a list of entries.
@@ -167,41 +192,30 @@ class Matrix:
 
     @property
     def transpose(self) -> MatrixType:
-        return Matrix([[self.data[i][j] for i in range(self.m)] for j in range(self.n)])
+        return Matrix([[self.data[i][j] for i in range(self.m)]
+                       for j in range(self.n)])
 
     #==================#
     # BASIC OPERATIONS #
     #==================#
 
     def __setitem__(self, key: Any, value: Any):
-        try: key[0]
-        except TypeError:  # replacing a row
-            assert isinstance(value, Matrix), 'RHS must be a matrix'
-            assert value.typ is self.typ, 'types of LHS and RHS do not match'
-            assert value.m == self[key].m and value.n == self[key].n, 'dimensions of LHS and RHS do not match'
-            if not isinstance(key, slice):
-                key = slice(key, key+1)
-            for idx, i in enumerate(range(self.m)[key]):
-                for j in range(self.n):
-                    self.data[i][j] = value.data[idx][j]
-        else:
-            match len(key):
-                case 2:
-                    rows, cols = key[0], key[1]
-                    match (isinstance(rows, slice), isinstance(cols, slice)):
-                        case (True, True): pass
-                        case (True, False): cols = slice(cols, cols+1)
-                        case (False, True): rows = slice(rows, rows+1)
-                        case (False, False):  # setting a single entry
-                            assert type(value) is self.typ, 'types of LHS and RHS do not match'
-                            self.data[rows][cols] = value
-                            return
-                    for idx1, i in enumerate(range(self.m)[rows]):
-                        for idx2, j in enumerate(range(self.n)[cols]):
-                            self.data[i][j] = value.data[idx1][idx2]
-                case other:
-                    raise AssertionError('__setitem__ must have either 1 or 2 arguments')
+        rows, cols, singleflag = Matrix._parse_key(key)
+        if singleflag:
+            assert isinstance(value, self.typ), 'types of LHS and RHS do not match'
+            self.data[rows][cols] = value
+            return
+        assert isinstance(value, Matrix), 'RHS must be a matrix'
+        assert value.typ is self.typ, 'types of LHS and RHS do not match'
+        assert value.m == self[key].m and value.n == self[key].n, 'dimensions of LHS and RHS do not match'
+        for idx1, i in enumerate(range(self.m)[rows]):
+            for idx2, j in enumerate(range(self.n)[cols]):
+                self.data[i][j] = value.data[idx1][idx2]
 
+    '''
+    __delitem__ does not use Matrix._parse_key as it handles 'single indices' in the same
+    way as it does slices.
+    '''
     def __delitem__(self, key: Any):
         try: key[0]
         except TypeError:  # deleting a row
@@ -212,11 +226,12 @@ class Matrix:
             match len(key):
                 case 2:
                     rows, cols = key[0], key[1]
-                    if rows == None:
+                    if rows is None:
                         rows = slice(0,0,1)  # empty slice
                     elif not isinstance(rows, slice):
                         rows = slice(rows, rows+1)
-                    if cols == None:
+
+                    if cols is None:
                         cols = slice(0,0,1)
                     elif not isinstance(cols, slice):
                         cols = slice(cols, cols+1)
@@ -228,33 +243,27 @@ class Matrix:
                     raise AssertionError('__delitem__ must have either 1 or 2 arguments')
 
     '''
-    Element-wise addition. Addition with None (to the left or right)
-    does nothing to the matrix.
+    Element-wise operations. If `oth` is None, then nothing is done to
+    the matrix.
     '''
     def __add__(self, oth: Optional[MatrixType]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         assert (self.n, self.m) == (oth.n, oth.m), 'dimensions do not match'
         return Matrix([[self[i,j]+oth[i,j] for j in range(self.n)] for i in range(self.m)])
 
     def __radd__(self, oth: Optional[MatrixType]) -> MatrixType:
-        assert oth == None
+        assert oth is None
         return self
 
-    '''
-    Negation.
-    '''
     def __neg__(self) -> MatrixType:
         return Matrix([[-self[i,j] for j in range(self.n)] for i in range(self.m)])
 
-    '''
-    Subtraction.
-    '''
     def __sub__(self, oth: Optional[MatrixType]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         return self + (-oth)
 
     def __rsub__(self, oth: Optional[MatrixType]) -> MatrixType:
-        assert oth == None
+        assert oth is None
         return self
 
     '''
@@ -262,15 +271,30 @@ class Matrix:
     '''
     def __mul__(self, oth: MatrixType) -> MatrixType:
         assert self.n == oth.m, 'matrix dimensions do not match'
-        return Matrix([[sum((self.data[i][k]*oth.data[k][j] for k in range(self.n)), self.default)
-                        for j in range(oth.n)] for i in range(self.m)])
+        A = [[None] * oth.n for _ in range(self.m)]
+        for i in range(self.m):
+            for j in range(oth.n):
+                A[i][j] = sum((self[i,k]*oth[k,j] for k in range(self.n)),
+                               self.default)
+        return Matrix(A)
+
+    '''
+    Matrix exponentiation.
+    '''
+    def __pow__(self, n: int) -> MatrixType:
+        assert n >= 0, 'exponent must be nonnegative'
+        assert self.n == self.m, 'matrix must be square'
+        if n == 0: return I(self.typ, self.n)
+        elif n == 1: return self
+        return self * self.__pow__(n-1)
 
     '''
     Scalar multiplication.
     '''
     def __rmul__(self, oth: Any) -> MatrixType:
         assert isinstance(oth, self.typ)
-        return Matrix([[oth*self[i,j] for j in range(self.n)] for i in range(self.m)])
+        return Matrix([[oth*self[i,j] for j in range(self.n)]
+                       for i in range(self.m)])
 
     '''
     There is an API around *extensions* to (nonempty) matrices, namely
@@ -286,6 +310,8 @@ class Matrix:
             case ExtensionType.row:
                 match ext.datatyp:
                     case ExtensionDataType.none:
+                        if self == Matrix():
+                            return Matrix()
                         return M(*[self.default for _ in range(self.m)], eor)
                     case ExtensionDataType.single:
                         if self != Matrix():
@@ -299,6 +325,8 @@ class Matrix:
             case ExtensionType.col:
                 match ext.datatyp:
                     case ExtensionDataType.none:
+                        if self == Matrix():
+                            return Matrix()
                         return M(*[self.default for _ in range(self.m)], eoc)
                     case ExtensionDataType.single:
                         if self != Matrix():
@@ -342,7 +370,7 @@ class Matrix:
     Just as with __add__, if the other argument is None then nothing is done.
     '''
     def __or__(self, oth: Optional[Union[MatrixType, ExtensionTyp]]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         if isinstance(oth, Matrix):
             return Matrix._concat_horizontal(self, oth)
         elif isinstance(oth, Extension):
@@ -357,7 +385,7 @@ class Matrix:
     another matrix to the left is already handled in __or__.
     '''
     def __ror__(self, oth: Optional[ExtensionTyp]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         match oth.typ:
             case ExtensionType.row:
                 return Matrix._concat_vertical(self._inferext(oth), self)
@@ -369,7 +397,7 @@ class Matrix:
     Just as with __add__, if the other argument is None then nothing is done.
     '''
     def __and__(self, oth: Optional[MatrixType]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         return Matrix._concat_vertical(self, oth)
 
     '''
@@ -382,7 +410,7 @@ class Matrix:
     Diagonally concatenating another matrix.
     '''
     def __xor__(self, oth: Optional[MatrixType]) -> MatrixType:
-        if oth == None: return deepcopy(self)
+        if oth is None: return deepcopy(self)
         return Matrix._concat_diagonal(self, oth)
 
     def __rxor__(self, oth: Optional[MatrixType]) -> MatrixType:
@@ -426,14 +454,17 @@ class Matrix:
     #===============#
     # MATH ROUTINES #
     #===============#
+
     '''
-    Morally this should only be defined for matrices over a EuclideanDomain.
-    But I cannot import the class as it would lead to circular imports.
+    These are meant for matrices over a EuclideanDomain.
+    Unfortunately importing the class (to add it as a type annotation)
+    leads to an import loop.
     '''
     @property
     def det(self):
         assert self.m == self.n, 'det only defined for square matrices'
         if self.m == 1: return self[0,0]
+        # apply the cofactor formula along the first column
         res = self.typ.zero
         for i in range(self.m):
             A = deepcopy(self)
@@ -460,9 +491,18 @@ class Matrix:
         if self.m == 1: return M(self.typ.one/self.det)
         return (self.typ.one/self.det) * self.adj
 
+    '''
+    The identity matrix.
+    '''
     def I(typ: type, n: int) -> MatrixType:
         assert n >= 0
-        return Matrix([[typ.zero for _ in range(i)] + [typ.one] + [typ.zero for _ in range(n-i-1)]
+        if typ is None:
+            return Matrix()
+        elif typ in (float, int):
+            one, zero = 1.0, 0.0
+        else:
+            one, zero = typ.one, typ.zero
+        return Matrix([[zero for _ in range(i)] + [one] + [zero for _ in range(n-i-1)]
                        for i in range(n)])
 
     '''
@@ -512,42 +552,6 @@ class Matrix:
         A[j,i] = c
         return A
 
-M = Matrix.M
-mapM = Matrix.mapM
-I = Matrix.I
-
-
-'''
-There are two types of extensions to a matrix M: `row` and `col`. There
-are three ways to specify an extension, corresponding to a different
-ExtensionDataType.
-- `none` means that the new row/col will be filled with `M.default`
-- `single` means that the new row/col will be filled with a single specified entry
-- `exact` means that a specified list of entries will be inserted
-
-Examples:
-> from euclidean_domain import Int
-> A = mapM(Int,1,2,3,4)
-> A | row()
-⎡ 1 2 ⎤
-⎢ 3 4 ⎥
-⎣ 0 0 ⎦
-> col(Int(5)) | A
-⎡ 5 1 2 ⎤
-⎣ 5 3 4 ⎦
-> A | row(Int(5),Int(6))
-⎡ 1 2 ⎤
-⎢ 3 4 ⎥
-⎣ 5 6 ⎦
-'''
-ExtensionType = Enum('ExtensionType', ('row', 'col'))
-ExtensionDataType = Enum('ExtensionDataType', ('none', 'single', 'exact'))
-class Extension:
-    @staticmethod
-    def _aux(*args: Any) -> ExtensionTyp:
-        ext = Extension()
-        if len(args) == 0:
-            ext.data = None
 M = Matrix.M
 mapM = Matrix.mapM
 I = Matrix.I

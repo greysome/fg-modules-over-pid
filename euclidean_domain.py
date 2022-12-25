@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from functools import reduce
+from math import factorial
 from copy import deepcopy
+from collections import Counter
 from typing import TypeAlias, Optional, Sequence, Union
 from matrix import Matrix
 
@@ -14,13 +16,15 @@ class EuclideanDomain(ABC):
     one = NotImplemented
     notation = NotImplemented
 
+    '''
+    Each subclass needs only implement the abstractmethods.
+    '''
+
     @abstractmethod
     def __add__(self): pass
 
     @abstractmethod
     def __neg__(self): pass
-
-    def __sub__(self, oth): return self + (-oth)
 
     @abstractmethod
     def __mul__(self, oth): pass
@@ -31,18 +35,55 @@ class EuclideanDomain(ABC):
     @abstractmethod
     def __eq__(self, oth): pass
 
+    '''
+    Make the subclass hashable so that Counters can be created.
+    '''
+    @abstractmethod
+    def __hash__(self): pass
+
     @property
     @abstractmethod
     def norm(self) -> int: pass
 
-    @property
-    def isunit(self) -> bool: return self.norm == 1
-
+    '''
+    This function essentially chooses a canonical element out of a
+    class of associate elements.
+    '''
     @abstractmethod
     def normalise(self) -> EDType: pass
 
     @abstractmethod
     def div(self, oth) -> tuple[EDType, EDType]: pass
+
+    '''
+    Return a Counter of factors with multiplicity, as well as an
+    extra unit factor.
+    e.g. Int(-6).factors -> (Int(-1), {Int(2): 1, Int(3): 1})
+    '''
+    @property
+    @abstractmethod
+    def factors(self) -> tuple[EDType,Counter]: pass
+
+    @property
+    def isunit(self) -> bool: return self.norm == 1
+
+    @property
+    def isprime(self) -> bool: return self.factors[1].total() == 1
+
+    def __radd__(self, oth):
+        return self + oth
+
+    def __sub__(self, oth):
+        return self + (-oth)
+
+    def __rsub__(self, oth):
+        return (-self) + oth
+
+    def __pow__(self, oth: int):
+        assert oth >= 0, 'exponent must be non-negative'
+        if oth == 0: return type(self).one
+        elif oth == 1: return deepcopy(self)
+        return self * self.__pow__(oth-1)
 
     def __floordiv__(self, oth):
         q, r = self.div(oth)
@@ -53,7 +94,7 @@ class EuclideanDomain(ABC):
         return r
 
     def __truediv__(self, oth):
-        assert oth.norm != 0, 'cannot divide by 0'
+        assert oth != type(self).zero, 'cannot divide by 0'
         q, r = self.div(oth)
         assert r.norm == 0
         return q
@@ -102,29 +143,152 @@ lcm = EuclideanDomain.lcm
 IntType: TypeAlias = 'Int'
 class Int(EuclideanDomain):
     notation = '\u2124'
+
     def __init__(self, n): self.n = n
-    @property
-    def norm(self): return abs(self.n)
-    def normalise(self):
-        return -self if self.n < 0 else self
+
     def __add__(self, oth): return Int(self.n + oth.n)
+
     def __neg__(self): return Int(-self.n)
+
     def __mul__(self, oth: Union[IntType, Matrix]):
         if isinstance(oth, Matrix):
             return oth.__rmul__(self)
         return Int(self.n * oth.n)
+
     def __repr__(self): return str(self.n)
+
     def __eq__(self, oth): return type(self) is type(oth) and self.n == oth.n
+
+    def __hash__(self): return hash(self.n)
+
+    @property
+    def norm(self): return abs(self.n)
+
+    def normalise(self): return -self if self.n < 0 else self
+
     def div(self, oth):
         if oth.norm == 0: return Int(0), Int(0)
         return Int(self.n // oth.n), Int(self.n % oth.n)
+
+    @property
+    def factors(self):
+        if self == Int.zero:
+            return Int.one, Counter()
+        elif self.isunit:
+            return self, Counter()
+        res = Counter()
+        for i in range(2, self.norm+1):
+            if self.n % i == 0:
+                q = Int(self.n // i)
+                if q.isunit:
+                    return q, Counter((Int(i),))
+                unit, factors = q.factors
+                return unit, Counter((Int(i),)) + factors
+
 Int.zero = Int(0)
 Int.one = Int(1)
+
+
+
+GIType: TypeAlias = 'GaussInt'
+class GaussInt(EuclideanDomain):
+    notation = '\u2124[i]'
+
+    def __init__(self, first: Union[int,tuple[int,int]], second: int = 0):
+        if isinstance(first, tuple): re, im = first
+        else: re, im = first, second
+        self.re = re
+        self.im = im
+
+    def __add__(self, oth): return GaussInt(self.re+oth.re, self.im+oth.im)
+
+    def __neg__(self): return GaussInt(-self.re, -self.im)
+
+    def __mul__(self, oth: Union[IntType, Matrix]):
+        if isinstance(oth, Matrix):
+            return oth.__rmul__(self)
+        a,b,c,d = self.re, self.im, oth.re, oth.im
+        return GaussInt(a*c-b*d, a*d+b*c)
+
+    def __repr__(self):
+        re_repr = repr(self.re) if self.re != 0 else ''
+        if self.im == 1: im_repr = '+i'
+        elif self.im == -1: im_repr = '-i'
+        elif self.im == 0: im_repr = ''
+        elif self.im >= 0: im_repr = f'+{self.im}i'
+        else: im_repr = f'-{-self.im}i'
+        return f'{re_repr}{im_repr}'
+
+    def __eq__(self, oth): return type(self) is type(oth) and self.re == oth.re and self.im == oth.im
+
+    def __hash__(self): return hash((self.re, self.im))
+
+    @property
+    def norm(self): return self.re**2 + self.im**2
+
+    def normalise(self):
+        for z in (self, self*GaussInt(-1), self*GaussInt(0,1), self*GaussInt(0,-1)):
+            if z.re >= 0 and z.im >= 0:
+                return z
+
+    def div(self, oth):
+        if oth.norm == 0:
+            return GaussInt(0), GaussInt(0)
+        a,b,c,d = self.re, self.im, oth.re, oth.im
+        m, n = round((a*c+b*d) / oth.norm), round((-a*d+b*c) / oth.norm)
+        return GaussInt(m,n), self - oth*GaussInt(m,n)
+
+    '''
+    Given a prime p that is 1 mod 4, return a and b such that p = a^2+b^2.
+    '''
+    @staticmethod
+    def sumsquares(p: int) -> int:
+        assert Int(p).isprime and p % 4 == 1
+        # x is a square root of -1 mod p.
+        x = factorial((p-1)//2) % p
+        # Perform the Euclidean algorithm on p and x, replacing them with
+        # the remainders until one of them is < p/2.
+        r, r_ = p, x
+        while True:
+            if r_ < r < p**0.5: return r, r_
+            r, r_ = r_, r%r_
+
+    @property
+    def factors(self):
+        if self == GaussInt.zero:
+            return GaussInt.one, Counter()
+        elif self.isunit:
+            return self, Counter()
+        cur_factor = None
+        _, norm_factors = Int(self.norm).factors
+        for p in norm_factors.elements():
+            p = p.n  # extract the integer from the Int object
+            if p % 4 == 1:
+                a, b = GaussInt.sumsquares(p)
+                cur_factor = GaussInt(a,b) if self % GaussInt(a,b) == GaussInt.zero else \
+                    GaussInt(a,-b)
+            elif p % 4 == 3:
+                cur_factor = GaussInt(p)
+            elif p == 2:
+                cur_factor = GaussInt(1,1) if self % GaussInt(1,1) == GaussInt.zero else \
+                    GaussInt(1,-1)
+
+        q = self // cur_factor
+        if q.isunit:
+            return q, Counter((cur_factor,))
+        unit, factors = q.factors
+        return unit, Counter((cur_factor,)) + factors
+
+GaussInt.one = GaussInt(1)
+GaussInt.zero = GaussInt(0)
+
 
 
 PolyType: TypeAlias = 'Poly'
 class Poly(EuclideanDomain):
     notation = '\u211a[x]'
+    tol = 1e-15
+
     def __init__(self, coeffs: Optional[Sequence[Number]] = None) -> None:
         if coeffs is None: coeffs = [0]
         self.coeffs = coeffs
@@ -134,6 +298,20 @@ class Poly(EuclideanDomain):
 
     @property
     def lead(self) -> Number: return self.coeffs[-1]
+
+    '''
+    Compensate for floating-point inaccuracies by replacing entries that are < tol with 0.
+    '''
+    def _enforce_tol(self):
+        for idx, x in enumerate(self.coeffs):
+            if abs(x) < Poly.tol:
+                self.coeffs[idx] = 0
+        # Trim leading 0 coeffs if necessary
+        for idx in range(len(self.coeffs)-1, 0, -1):
+            if self.coeffs[idx] == 0:
+                del self.coeffs[idx]
+            else:
+                break
 
     '''
     Argument can be a Number (int or float) or another Poly.
@@ -154,19 +332,9 @@ class Poly(EuclideanDomain):
         while True:
             if len(L) == 1 or L[-1] != 0: break
             if L[-1] == 0: del L[-1]
-        return Poly(L)
-
-    def __radd__(self, oth: Number):
-        return self + oth
-
-    '''
-    Argument can be a Number (int or float) or another Poly.
-    '''
-    def __sub__(self, oth: Union[Number, PolyType]):
-        return self + (-oth)
-
-    def __rsub__(self, oth: Number):
-        return self + (-oth)
+        P = Poly(L)
+        P._enforce_tol()
+        return P
 
     def __neg__(self): return Poly([-x for x in self.coeffs])
 
@@ -182,6 +350,7 @@ class Poly(EuclideanDomain):
         for idx1, i in enumerate(self.coeffs):
             for idx2, j in enumerate(oth.coeffs):
                 P += Poly([0 for _ in range(idx1+idx2)] + [i*j])
+        P._enforce_tol()
         return P
 
     def __rmul__(self, oth: Number):
@@ -194,17 +363,14 @@ class Poly(EuclideanDomain):
         if m < n: return P, _self
         super().div(oth)
         M = (_self.lead/oth.lead) * Poly([0,1])**(m-n)
-        return Poly._div(_self-M*oth, oth, P+M)
+        P, acc = Poly._div(_self-M*oth, oth, P+M)
+        P._enforce_tol()
+        acc._enforce_tol()
+        return P, acc
 
     def div(self, oth: PolyType) -> tuple[PolyType,PolyType]:
         if oth.norm == 0: return Poly(), Poly()
         return Poly._div(self, oth, Poly())
-
-    def __pow__(self, oth: int):
-        assert oth >= 0, 'index must be non-negative'
-        if oth == 0: return Poly([1])
-        elif oth == 1: return deepcopy(self)
-        return self * self.__pow__(oth-1)
 
     def __truediv__(self, oth: Union[Number, PolyType]):
         assert oth != 0 and oth != 0*C, 'cannot divide by 0'
@@ -250,40 +416,9 @@ class Poly(EuclideanDomain):
     def __eq__(self, oth):
         return type(self) is type(oth) and self.coeffs == oth.coeffs
 
+    def factors(self): pass
+
 Poly.zero = Poly([0])
 Poly.one = Poly([1])
 X = Poly([0,1])
 C = Poly([1])
-
-GIType: TypeAlias = 'GaussInt'
-class GaussInt(EuclideanDomain):
-    notation = '\u2124[i]'
-    def __init__(self, first: Union[int,tuple[int,int]], second: int = 0):
-        if isinstance(first, tuple): re, im = first
-        else: re, im = first, second
-        self.re = re
-        self.im = im
-    @property
-    def norm(self): return self.re**2 + self.im**2
-    def normalise(self):
-        for z in (self, self*GaussInt(-1), self*GaussInt(0,1), self*GaussInt(0,-1)):
-            if z.re >= 0 and z.im >= 0:
-                return z
-    def __add__(self, oth): return GaussInt(self.re+oth.re, self.im+oth.im)
-    def __neg__(self): return GaussInt(-self.re, -self.im)
-    def __mul__(self, oth: Union[IntType, Matrix]):
-        if isinstance(oth, Matrix):
-            return oth.__rmul__(self)
-        a,b,c,d = self.re, self.im, oth.re, oth.im
-        return GaussInt(a*c-b*d, a*d+b*c)
-    def __repr__(self): return f'{self.re}+{self.im}i' if self.im >= 0 else \
-        f'{self.re}-{-self.im}i'
-    def __eq__(self, oth): return type(self) is type(oth) and self.re == oth.re and self.im == oth.im
-    def div(self, oth):
-        if oth.norm == 0: return GaussInt(0), GaussInt(0)
-        a,b,c,d = self.re, self.im, oth.re, oth.im
-        m, n = round((a*c+b*d) / oth.norm), round((-a*d+b*c) / oth.norm)
-        return GaussInt(m,n), self - oth*GaussInt(m,n)
-
-GaussInt.one = GaussInt(1)
-GaussInt.zero = GaussInt(0)

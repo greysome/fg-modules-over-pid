@@ -110,11 +110,6 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual(mapM(Int,5,6,7,8) & A, mapM(Int,5,6,eor,7,8,1,2,3,4))
         self.assertEqual(A & None, A)
         self.assertEqual(None & A, A)
-        self.assertEqual(diag(Int(5)) | A, mapM(Int,5,0,0,0,1,2,0,3,4))
-        self.assertEqual(A | diag(Int(5)), mapM(Int,1,2,0,3,4,0,0,0,5))
-        self.assertEqual(diag(Int(1)) | M(), mapM(Int,1))
-        self.assertEqual(M() | diag(Int(1)), mapM(Int,1))
-
         self.assertEqual(A ^ mapM(Int,5,6,eoc), mapM(Int,1,2,0,eor,3,4,0,0,0,5,0,0,6))
         self.assertEqual(A ^ None, A)
         self.assertEqual(None ^ A, A)
@@ -198,8 +193,8 @@ class MathTest(unittest.TestCase):
     def test_det(self):
         self.assertEqual(M(Int(1)).det, Int(1))
         self.assertEqual(mapM(Int,1,2,3,5).det, Int(-1))
-        self.assertEqual(mapM(Int,1,2,3,5).adj, mapM(Int,5,-3,-2,1))
-        self.assertEqual(mapM(Int,1,2,3,5).inv, mapM(Int,-5,3,2,-1))
+        self.assertEqual(mapM(Int,1,2,3,5).adj, mapM(Int,5,-2,-3,1))
+        self.assertEqual(mapM(Int,1,2,3,5).inv, mapM(Int,-5,2,3,-1))
 
     def test_I(self):
         self.assertEqual(I(Int,0), M())

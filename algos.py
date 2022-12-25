@@ -137,6 +137,7 @@ def _smith(A: MatrixType, P: MatrixType, Q: MatrixType) -> tuple[MatrixType,Matr
         if (x := A[1:,1:].find(lambda x: x % A[0,0] != A.typ.zero)) == None:
             break
         a, b = x[0]+1, x[1]+1
+
         P = A.addrow(0, a, A.typ.one) * P
 
     A[0,0] = A[0,0].normalise()
@@ -189,13 +190,84 @@ def solve2(A: MatrixType) -> MatrixType:
     # Take transpose so that the basis elements form rows.
     return (Q * S).transpose
 
-'''
-Print out the direct sum decomposition for D^m/K, where `K.typ = D`
-and `K.m = m`.
-'''
-def decompose(K: MatrixType):
+def invariants(K: MatrixType) -> list[EuclideanDomain]:
     A, P, Q = smith(K)
-    annihilators = [A[i,i] for i in range(min(A.m,A.n)) if A[i,i] != A.typ.one] + \
-        [A.typ.zero for i in range(max(0,A.n-A.m))]
-    print(' \u2295 '.join((f'{K.typ.notation}' if d == K.typ.zero else f'{K.typ.notation}/({d})')
-                          for d in annihilators))
+    annihilators = [A[i,i] for i in range(min(A.m,A.n))]
+    annihilators += [A.typ.zero for i in range(max(0, A.n-A.m))]
+    return annihilators
+
+def elementaries(K: MatrixType) -> tuple[int, list[tuple[EuclideanDomain,int]]]:
+    L = invariants(K)
+    rank = L.count(K.typ.zero)
+    L = filter(lambda x: x not in (K.typ.zero, K.typ.one), L)
+    L = list(map(lambda x: x.factors, L))
+    all_factors = reduce(lambda l,x: l.union(set(x[1].keys())), L, set())
+    prime_powers = []
+    for p in all_factors:
+        for unit, factors in L:
+            if p in factors.keys():
+                prime_powers.append((p, factors[p]))
+    return rank, prime_powers
+
+'''
+Pretty print the direct sum decomposition for D^m/K in terms of invariant factors.
+Here `K.typ = D` and `K.m = m`.
+'''
+def print_invariants(K: MatrixType) -> None:
+    strs = []
+    for d in invariants(K):
+        if d == K.typ.zero:
+            strs.append(K.typ.notation)
+        elif d != K.typ.one:
+            strs.append(f'{K.typ.notation}/({d})')
+    print(' \u2295 '.join(strs))
+
+'''
+Pretty print the direct sum decomposition for D^m/K in terms of elementary factors.
+Here `K.typ = D` and `K.m = m`.
+'''
+def print_elementaries(K: MatrixType) -> None:
+    rank, L = elementaries(K)
+    strs = []
+    for p, power in L:
+        if power == 1:
+            strs.append(f'{K.typ.notation}/({p})')
+        else:
+            strs.append(f'{K.typ.notation}/({p})^{power}')
+    strs += [K.typ.notation for _ in range(rank)]
+    print(' \u2295 '.join(strs))
+
+'''
+Companion matrix for the polynomial P.
+'''
+def companion(P: Poly) -> MatrixType:
+    P = P.normalise()
+    deg = len(P.coeffs) - 1
+    if deg == 0:
+        return Matrix()
+    elif deg == 1:
+        return M(-P.coeffs[0])
+    else:
+        return (col() | I(float, deg-1)) | row(*(-P).coeffs[:-1])
+
+'''
+The rational canonical form. Currently only supports matrices over Q.
+'''
+def rcf(K: MatrixType) -> None:
+    assert K.typ in (int,float,Int)
+
+    # convert K to the matrix K-X*I over Poly
+    data = K.data
+    for i in range(K.m):
+        for j in range(K.n):
+            if i == j:
+                data[i][j] -= X
+            else:
+                data[i][j] = data[i][j]*C
+
+    K = Matrix(data)
+    L = invariants(K)
+    K_ = Matrix()
+    for P in L:
+        K_ ^= companion(P)
+    return K_
